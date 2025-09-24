@@ -306,10 +306,11 @@ if __name__ == '__main__':
     print("   GET /api/navigation/sessions - Get all sessions")
     print("   GET /api/health - Health check")
     print("=" * 60)
-    
+    port = int(os.environ.get('PORT', 5000))
     # Run the server
     app.run(
         host='0.0.0.0',  # Listen on all interfaces
-        port=5000,       # Port 5000
-        debug=True       # Enable debug mode
+        port=port,       # Port 5000
+        debug=false     # Enable debug mode
+
     )
