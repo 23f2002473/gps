@@ -10,23 +10,25 @@ CORS(app)  # Enable CORS for React Native requests
 # Store completed steps in memory (you can replace with database)
 navigation_sessions = {}
 completed_steps = []
+location_history = {}  # New: Store location tracking history
 
 # Single destination configuration - modify this as needed
 CURRENT_DESTINATION = {
     "id": "dest_active",
-    "name": "Regional Hospital",
-    "description": "Government Regional Hospital - Emergency Services",
-    "category": "Healthcare",
+    "name": "Sundernagar Bus Stand",
+    "description": "Main Bus Stand - Public Transport Hub",
+    "category": "Transport",
     "coordinates": {
-        "latitude": 31.7140,
-        "longitude": 76.9094
+        "latitude": 31.53710695981553,
+        "longitude": 76.89220591261135
     },
-    "address": "Hospital Road, Baddi, Himachal Pradesh",
-    "distance": "1.8 km",
-    "estimated_time": "12 min",
+    "address": "Bus Stand Road, Sundernagar, Mandi, Himachal Pradesh",
+    "distance": "2.5 km",
+    "estimated_time": "18 min",
     "priority": "high",
-    "instructions": "Navigate to hospital for medical assistance"
+    "instructions": "Navigate to main bus stand for public transport"
 }
+
 
 @app.route('/api/destination', methods=['GET'])
 def get_current_destination():
@@ -83,6 +85,209 @@ def get_current_destination():
         
     except Exception as e:
         print(f"❌ Error fetching destination: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/location/update', methods=['POST'])
+def update_location():
+    """
+    Receive continuous location updates from the app
+    Expected data: {
+        "session_id": "optional_session_id", 
+        "user_id": "optional_user_id",
+        "location": {
+            "latitude": float,
+            "longitude": float,
+            "altitude": float (optional),
+            "accuracy": float (optional),
+            "speed": float (optional),
+            "heading": float (optional)
+        },
+        "timestamp": "ISO_timestamp"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "error": "No data provided"
+            }), 400
+        
+        location_data = data.get('location')
+        if not location_data or 'latitude' not in location_data or 'longitude' not in location_data:
+            return jsonify({
+                "success": False,
+                "error": "Location data with latitude and longitude required"
+            }), 400
+        
+        # Create location record
+        location_record = {
+            "session_id": data.get('session_id', 'anonymous'),
+            "user_id": data.get('user_id', 'anonymous'),
+            "location": location_data,
+            "timestamp": data.get('timestamp', datetime.datetime.now().isoformat()),
+            "server_received_at": datetime.datetime.now().isoformat()
+        }
+        
+        # Store in location history
+        session_key = data.get('session_id', 'anonymous')
+        if session_key not in location_history:
+            location_history[session_key] = []
+        
+        location_history[session_key].append(location_record)
+        
+        # Keep only last 100 locations per session to prevent memory issues
+        if len(location_history[session_key]) > 100:
+            location_history[session_key] = location_history[session_key][-100:]
+        
+        # Calculate distance to destination if available
+        distance_to_destination = None
+        if CURRENT_DESTINATION:
+            try:
+                import math
+                R = 6371  # Earth's radius in km
+                lat1 = math.radians(location_data['latitude'])
+                lng1 = math.radians(location_data['longitude'])
+                lat2 = math.radians(CURRENT_DESTINATION['coordinates']['latitude'])
+                lng2 = math.radians(CURRENT_DESTINATION['coordinates']['longitude'])
+                
+                dlat = lat2 - lat1
+                dlng = lng2 - lng1
+                a = (math.sin(dlat/2)**2 + 
+                     math.cos(lat1) * math.cos(lat2) * math.sin(dlng/2)**2)
+                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                distance_to_destination = R * c  # Distance in km
+                
+            except Exception as calc_error:
+                print(f"Distance calculation error: {calc_error}")
+        
+        # Log location update (less verbose to avoid spam)
+        print(f"📍 Location update: {location_data['latitude']:.6f}, {location_data['longitude']:.6f}")
+        if distance_to_destination:
+            print(f"🎯 Distance to destination: {distance_to_destination:.1f}km")
+        
+        response_data = {
+            "success": True,
+            "message": "Location updated successfully",
+            "session_id": session_key,
+            "received_at": location_record["server_received_at"]
+        }
+        
+        # Add distance info if calculated
+        if distance_to_destination is not None:
+            response_data["distance_to_destination"] = {
+                "kilometers": round(distance_to_destination, 3),
+                "meters": round(distance_to_destination * 1000),
+                "destination_name": CURRENT_DESTINATION['name']
+            }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        print(f"❌ Error updating location: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/location/history/<session_id>', methods=['GET'])
+def get_location_history(session_id):
+    """Get location history for a specific session"""
+    try:
+        if session_id not in location_history:
+            return jsonify({
+                "success": False,
+                "error": "No location history found for this session"
+            }), 404
+        
+        history = location_history[session_id]
+        
+        # Calculate some basic stats
+        if history:
+            total_points = len(history)
+            first_location = history[0]
+            last_location = history[-1]
+            
+            # Calculate total distance traveled (approximate)
+            total_distance = 0
+            for i in range(1, len(history)):
+                prev_loc = history[i-1]['location']
+                curr_loc = history[i]['location']
+                
+                try:
+                    import math
+                    R = 6371
+                    lat1, lng1 = math.radians(prev_loc['latitude']), math.radians(prev_loc['longitude'])
+                    lat2, lng2 = math.radians(curr_loc['latitude']), math.radians(curr_loc['longitude'])
+                    
+                    dlat, dlng = lat2 - lat1, lng2 - lng1
+                    a = (math.sin(dlat/2)**2 + 
+                         math.cos(lat1) * math.cos(lat2) * math.sin(dlng/2)**2)
+                    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                    total_distance += R * c
+                except:
+                    pass
+        else:
+            total_points = 0
+            first_location = None
+            last_location = None
+            total_distance = 0
+        
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "location_history": history,
+            "stats": {
+                "total_points": total_points,
+                "total_distance_km": round(total_distance, 3),
+                "first_location": first_location,
+                "last_location": last_location,
+                "time_span": {
+                    "start": first_location['timestamp'] if first_location else None,
+                    "end": last_location['timestamp'] if last_location else None
+                }
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/location/current/<session_id>', methods=['GET'])
+def get_current_location(session_id):
+    """Get the most recent location for a session"""
+    try:
+        if session_id not in location_history or not location_history[session_id]:
+            return jsonify({
+                "success": False,
+                "error": "No location data found for this session"
+            }), 404
+        
+        latest_location = location_history[session_id][-1]
+        
+        # Calculate time since last update
+        try:
+            last_update = datetime.datetime.fromisoformat(latest_location['server_received_at'].replace('Z', '+00:00'))
+            time_since_update = datetime.datetime.now() - last_update
+            seconds_since_update = time_since_update.total_seconds()
+        except:
+            seconds_since_update = None
+        
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "current_location": latest_location,
+            "seconds_since_last_update": seconds_since_update,
+            "is_recent": seconds_since_update < 30 if seconds_since_update else False  # Consider recent if < 30 seconds
+        }), 200
+        
+    except Exception as e:
         return jsonify({
             "success": False,
             "error": str(e)
@@ -176,8 +381,13 @@ def start_navigation():
             "started_at": datetime.datetime.now().isoformat(),
             "completed_steps": 0,
             "status": "active",
-            "user_type": "blind_navigation"
+            "user_type": "blind_navigation",
+            "location_tracking_enabled": True  # Enable location tracking for this session
         }
+        
+        # Initialize location history for this session if not exists
+        if session_id not in location_history:
+            location_history[session_id] = []
         
         print(f"🚀 BLIND NAVIGATION STARTED")
         print(f"📋 Session: {session_id}")
@@ -185,6 +395,7 @@ def start_navigation():
         print(f"📍 From: {data.get('user_location')}")
         print(f"📊 Route: {data.get('total_steps')} steps, {data.get('total_distance')}, {data.get('total_duration')}")
         print(f"🔊 Voice navigation active")
+        print(f"📍 Location tracking enabled")
         print("=" * 60)
         
         return jsonify({
@@ -193,6 +404,7 @@ def start_navigation():
             "session_id": session_id,
             "destination_name": CURRENT_DESTINATION['name'],
             "voice_announcement": f"Navigation started. Proceeding to {CURRENT_DESTINATION['name']}. {data.get('total_distance')} ahead.",
+            "location_tracking_enabled": True,
             "timestamp": datetime.datetime.now().isoformat()
         }), 200
         
@@ -341,6 +553,7 @@ def navigation_complete():
         navigation_sessions[session_id]['final_location'] = data.get('final_location')
         navigation_sessions[session_id]['actual_total_time'] = data.get('total_time')
         navigation_sessions[session_id]['actual_distance_traveled'] = data.get('total_distance_traveled')
+        navigation_sessions[session_id]['location_tracking_enabled'] = False  # Disable location tracking
         
         destination_name = navigation_sessions[session_id]['destination']['name']
         
@@ -351,6 +564,7 @@ def navigation_complete():
         print(f"⏱️  Total time: {data.get('total_time', 'N/A')}")
         print(f"🛣️  Distance traveled: {data.get('total_distance_traveled', 'N/A')}km")
         print(f"🔊 Navigation completed successfully")
+        print(f"📍 Location tracking stopped")
         print("=" * 60)
         
         return jsonify({
@@ -358,6 +572,7 @@ def navigation_complete():
             "message": f"Navigation to {destination_name} completed successfully",
             "destination_name": destination_name,
             "voice_announcement": f"Navigation complete. You have successfully arrived at {destination_name}.",
+            "location_tracking_stopped": True,
             "session_summary": {
                 "session_id": session_id,
                 "destination": destination_name,
@@ -389,10 +604,18 @@ def get_navigation_status(session_id):
         session = navigation_sessions[session_id]
         session_steps = [step for step in completed_steps if step['session_id'] == session_id]
         
+        # Get location tracking info
+        location_tracking_info = {
+            "enabled": session.get('location_tracking_enabled', False),
+            "total_location_points": len(location_history.get(session_id, [])),
+            "latest_location": location_history[session_id][-1] if session_id in location_history and location_history[session_id] else None
+        }
+        
         return jsonify({
             "success": True,
             "session": session,
             "completed_steps_detail": session_steps,
+            "location_tracking": location_tracking_info,
             "summary": {
                 "total_steps": session.get('total_steps', 0),
                 "completed_steps": len(session_steps),
@@ -417,6 +640,8 @@ def get_all_sessions():
             "sessions": list(navigation_sessions.values()),
             "total_sessions": len(navigation_sessions),
             "total_completed_steps": len(completed_steps),
+            "total_location_points": sum(len(history) for history in location_history.values()),
+            "active_location_tracking_sessions": len([s for s in navigation_sessions.values() if s.get('location_tracking_enabled', False)]),
             "current_destination": CURRENT_DESTINATION['name']
         }), 200
     except Exception as e:
@@ -434,6 +659,8 @@ def health_check():
         "timestamp": datetime.datetime.now().isoformat(),
         "active_sessions": len([s for s in navigation_sessions.values() if s.get('status') == 'active']),
         "total_sessions": len(navigation_sessions),
+        "location_tracking_sessions": len([s for s in navigation_sessions.values() if s.get('location_tracking_enabled', False)]),
+        "total_location_points": sum(len(history) for history in location_history.values()),
         "current_destination": CURRENT_DESTINATION['name'],
         "service_type": "blind_navigation"
     }), 200
@@ -443,9 +670,13 @@ if __name__ == '__main__':
     print("🔊 Optimized for blind users - voice navigation")
     print(f"🎯 Current destination: {CURRENT_DESTINATION['name']}")
     print("📡 Listening for navigation requests...")
+    print("📍 Location tracking enabled")
     print("🔗 API Endpoints:")
     print("   GET /api/destination - Get current destination")
     print("   POST /api/destination/update - Update destination (admin)")
+    print("   POST /api/location/update - Receive location updates")
+    print("   GET /api/location/history/<session_id> - Get location history")
+    print("   GET /api/location/current/<session_id> - Get current location")
     print("   POST /api/navigation/start - Start navigation session")
     print("   POST /api/navigation/step-completed - Step completion notification")
     print("   POST /api/navigation/complete - Mark navigation complete")
