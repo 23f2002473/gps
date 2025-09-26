@@ -665,13 +665,18 @@ def health_check():
         "service_type": "blind_navigation"
     }), 200
     
-@app.route('/api/user_current_location', method=['GET'])
-def user_current_location()
+
+
+@app.route('/api/user_current_location', methods=['GET'])  # 'methods' not 'method'
+def user_current_location():  
     return jsonify({ 
         "success": True,
-        "longitude":"31.51645",
-        "latitude":"76.87841"
-    }),200
+        "longitude": "31.51645",
+        "latitude": "76.87841"
+    }), 200
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
     
 if __name__ == '__main__':
     print("🚀 Starting Blind Navigation API Server...")
@@ -699,3 +704,4 @@ if __name__ == '__main__':
         port=port,       # Port 5000
         debug=False       # Enable debug mode
     )
+
