@@ -778,6 +778,7 @@ if __name__ == '__main__':
     # Run the server
     app.run(
         host='0.0.0.0',  # Listen on all interfaces
-        port=5000,       # Port 5000
+        port=port,       # Port 5000
         debug=False       # Enable debug mode
     )
+
