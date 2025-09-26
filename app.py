@@ -13,21 +13,7 @@ completed_steps = []
 location_history = {}  # New: Store location tracking history
 
 # Single destination configuration - modify this as needed
-CURRENT_DESTINATION = {
-    "id": "dest_active",
-    "name": "Sundernagar Bus Stand",
-    "description": "Main Bus Stand - Public Transport Hub",
-    "category": "Transport",
-    "coordinates": {
-        "latitude": 31.53710695981553,
-        "longitude": 76.89220591261135
-    },
-    "address": "Bus Stand Road, Sundernagar, Mandi, Himachal Pradesh",
-    "distance": "2.5 km",
-    "estimated_time": "18 min",
-    "priority": "high",
-    "instructions": "Navigate to main bus stand for public transport"
-}
+
 
 
 @app.route('/api/destination', methods=['GET'])
@@ -704,4 +690,5 @@ if __name__ == '__main__':
         port=port,       # Port 5000
         debug=False       # Enable debug mode
     )
+
 
