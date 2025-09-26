@@ -671,8 +671,8 @@ def health_check():
 def user_current_location():  
     return jsonify({ 
         "success": True,
-        "longitude": "31.51645",
-        "latitude": "76.87841"
+        "latitude": "31.51645",
+        "longitude": "76.87841"
     }), 200
 
 if __name__ == '__main__':
