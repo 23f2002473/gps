@@ -378,6 +378,75 @@ def get_current_location(session_id):
         }), 500
 
 
+@app.route('/api/location/all', methods=['GET'])
+def get_all_locations():
+    """Get all location data across all sessions"""
+    try:
+        limit = request.args.get('limit', type=int)
+        
+        all_locations = []
+        for session_id, locations in location_history.items():
+            for loc in locations:
+                all_locations.append(loc)
+        
+        # Sort by timestamp (most recent first)
+        all_locations.sort(key=lambda x: x.get('server_received_at', ''), reverse=True)
+        
+        if limit:
+            all_locations = all_locations[:limit]
+        
+        return jsonify({
+            "success": True,
+            "locations": all_locations,
+            "total_locations": len(all_locations),
+            "total_sessions": len(location_history),
+            "sessions": list(location_history.keys())
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/location/sessions', methods=['GET'])
+def get_location_sessions():
+    """Get summary of all sessions with location data"""
+    try:
+        sessions_summary = []
+        
+        for session_id, locations in location_history.items():
+            if locations:
+                first_loc = locations[0]
+                last_loc = locations[-1]
+                
+                summary = {
+                    "session_id": session_id,
+                    "total_points": len(locations),
+                    "first_location": first_loc,
+                    "last_location": last_loc,
+                    "time_span": {
+                        "start": first_loc.get('timestamp'),
+                        "end": last_loc.get('timestamp')
+                    }
+                }
+                sessions_summary.append(summary)
+        
+        return jsonify({
+            "success": True,
+            "sessions": sessions_summary,
+            "total_sessions": len(sessions_summary),
+            "total_location_points": sum(len(locs) for locs in location_history.values())
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @app.route('/api/destination/update', methods=['POST'])
 def update_destination():
     """
@@ -795,6 +864,183 @@ def get_all_sessions():
         }), 500
 
 
+@app.route('/api/navigation/progress/<session_id>', methods=['GET'])
+def get_navigation_progress(session_id):
+    """Get detailed navigation progress for a session"""
+    try:
+        if session_id not in navigation_sessions:
+            return jsonify({
+                "success": False,
+                "error": "Navigation session not found"
+            }), 404
+        
+        session = navigation_sessions[session_id]
+        session_active = [step for step in active_steps if step['session_id'] == session_id]
+        session_completed = [step for step in completed_steps if step['session_id'] == session_id]
+        
+        total_steps = session.get('total_steps', 0)
+        completed_count = len(session_completed)
+        progress_percentage = (completed_count / total_steps * 100) if total_steps > 0 else 0
+        
+        latest_location = None
+        if session_id in location_history and location_history[session_id]:
+            latest_location = location_history[session_id][-1]
+        
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "destination": session['destination'],
+            "progress": {
+                "total_steps": total_steps,
+                "completed_steps": completed_count,
+                "active_steps": len(session_active),
+                "remaining_steps": total_steps - completed_count,
+                "percentage": round(progress_percentage, 1)
+            },
+            "latest_active_step": session_active[-1] if session_active else None,
+            "latest_completed_step": session_completed[-1] if session_completed else None,
+            "latest_location": latest_location,
+            "status": session.get('status', 'unknown'),
+            "started_at": session.get('started_at'),
+            "completed_at": session.get('completed_at')
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/steps/active', methods=['GET'])
+def get_all_active_steps():
+    """Get all active steps across all sessions"""
+    try:
+        session_id = request.args.get('session_id')
+        
+        if session_id:
+            # Filter by session_id if provided
+            session_steps = [step for step in active_steps if step['session_id'] == session_id]
+            return jsonify({
+                "success": True,
+                "session_id": session_id,
+                "active_steps": session_steps,
+                "total_active_steps": len(session_steps)
+            }), 200
+        else:
+            # Return all active steps
+            return jsonify({
+                "success": True,
+                "active_steps": active_steps,
+                "total_active_steps": len(active_steps),
+                "sessions_with_active_steps": len(set(step['session_id'] for step in active_steps))
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/steps/completed', methods=['GET'])
+def get_all_completed_steps():
+    """Get all completed steps across all sessions"""
+    try:
+        session_id = request.args.get('session_id')
+        
+        if session_id:
+            # Filter by session_id if provided
+            session_steps = [step for step in completed_steps if step['session_id'] == session_id]
+            return jsonify({
+                "success": True,
+                "session_id": session_id,
+                "completed_steps": session_steps,
+                "total_completed_steps": len(session_steps)
+            }), 200
+        else:
+            # Return all completed steps
+            return jsonify({
+                "success": True,
+                "completed_steps": completed_steps,
+                "total_completed_steps": len(completed_steps),
+                "sessions_with_completed_steps": len(set(step['session_id'] for step in completed_steps))
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/steps/latest/<session_id>', methods=['GET'])
+def get_latest_step(session_id):
+    """Get the latest active or completed step for a session"""
+    try:
+        # Get latest active step
+        session_active = [step for step in active_steps if step['session_id'] == session_id]
+        latest_active = session_active[-1] if session_active else None
+        
+        # Get latest completed step
+        session_completed = [step for step in completed_steps if step['session_id'] == session_id]
+        latest_completed = session_completed[-1] if session_completed else None
+        
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "latest_active_step": latest_active,
+            "latest_completed_step": latest_completed,
+            "total_active_steps": len(session_active),
+            "total_completed_steps": len(session_completed)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/analytics/summary', methods=['GET'])
+def get_analytics_summary():
+    """Get overall analytics and summary of all navigation data"""
+    try:
+        total_sessions = len(navigation_sessions)
+        active_sessions = len([s for s in navigation_sessions.values() if s.get('status') == 'active'])
+        completed_sessions = len([s for s in navigation_sessions.values() if s.get('status') == 'completed'])
+        
+        total_location_points = sum(len(locs) for locs in location_history.values())
+        sessions_with_locations = len(location_history)
+        
+        return jsonify({
+            "success": True,
+            "summary": {
+                "sessions": {
+                    "total": total_sessions,
+                    "active": active_sessions,
+                    "completed": completed_sessions
+                },
+                "steps": {
+                    "total_active": len(active_steps),
+                    "total_completed": len(completed_steps)
+                },
+                "locations": {
+                    "total_points": total_location_points,
+                    "sessions_tracked": sessions_with_locations
+                },
+                "current_destination": CURRENT_DESTINATION
+            },
+            "timestamp": datetime.datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -818,21 +1064,34 @@ if __name__ == '__main__':
     print(f"📍 Coordinates: {CURRENT_DESTINATION['coordinates']['latitude']}, {CURRENT_DESTINATION['coordinates']['longitude']}")
     print("📡 Listening for navigation requests...")
     print("📍 Location tracking enabled")
-    print("🔗 API Endpoints:")
+    print("\n🔗 API Endpoints:")
+    print("\n📍 Destination Endpoints:")
     print("   GET  /api/destination - Get current destination")
     print("   POST /api/destination/update - Update destination (admin)")
+    print("\n📡 Location Endpoints:")
     print("   POST /api/location/update - Receive detailed location updates")
     print("   POST /api/location/simple - Receive simple location updates")
     print("   GET  /api/location/history/<session_id> - Get location history")
     print("   GET  /api/location/current/<session_id> - Get current location")
+    print("   GET  /api/location/all - Get all locations (optional ?limit=N)")
+    print("   GET  /api/location/sessions - Get location sessions summary")
+    print("\n🚶 Navigation Endpoints:")
     print("   POST /api/navigation/start - Start navigation session")
-    print("   POST /api/navigation/step-active - New step active (🆕)")
+    print("   POST /api/navigation/step-active - New step active")
     print("   POST /api/navigation/step-completed - Step completion notification")
     print("   POST /api/navigation/complete - Mark navigation complete")
     print("   GET  /api/navigation/status/<session_id> - Get session status")
     print("   GET  /api/navigation/sessions - Get all sessions")
+    print("   GET  /api/navigation/progress/<session_id> - Get navigation progress")
+    print("\n👣 Step Endpoints:")
+    print("   GET  /api/steps/active - Get all active steps (optional ?session_id=X)")
+    print("   GET  /api/steps/completed - Get all completed steps (optional ?session_id=X)")
+    print("   GET  /api/steps/latest/<session_id> - Get latest step info")
+    print("\n📊 Analytics & Health:")
+    print("   GET  /api/analytics/summary - Get overall analytics summary")
     print("   GET  /api/health - Health check")
     print("=" * 60)
+    
     port = int(os.environ.get('PORT', 5000))
     # Run the server
     app.run(
@@ -840,6 +1099,7 @@ if __name__ == '__main__':
         port=port,       # Port 5000
         debug=False       # Enable debug mode
     )
+
 
 
 
